@@ -1,6 +1,6 @@
 # GKE with serviceaccount
 
-## Create Service Account
+## Create Node's Service Account
 
 ```shell
 export NODE_SA_NAME=gke-node-sa
@@ -24,6 +24,25 @@ gcloud beta container clusters create gke-serviceaccount-test \
   --service-account=$NODE_SA_EMAIL \
   --zone=$ZONE \
   --cluster-version=$VERSION
+```
+
+## Create CI/CD's Service Account
+
+```shell
+export CICD_SA_NAME=gke-cicd-sa
+
+gcloud iam service-accounts create $CICD_SA_NAME --display-name "CI/CD Service Account"
+export CICD_SA_EMAIL=`gcloud iam service-accounts list --format='value(email)' --filter='displayName:CI/CD Service Account'`
+
+export PROJECT=`gcloud config get-value project`
+
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${CICD_SA_EMAIL} --role=roles/container.developer
+
+gcloud iam service-accounts keys create \
+    ~/key.json \
+    --iam-account $CICD_SA_EMAIL
+
+GOOGLE_APPLICATION_CREDENTIALS="~/key.json" gcloud container clusters get-credentials gke-serviceaccount-test --zone $ZONE --project $PROJECT
 ```
 
 ## Run Workload
