@@ -45,16 +45,22 @@ gcloud iam service-accounts keys create \
     --iam-account $CICD_SA_EMAIL
 
 gcloud auth activate-service-account $CICD_SA_EMAIL --key-file=key.json
-
-# Generate token from key
-export GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json"
-gcloud beta auth application-default print-access-token > /home/$USER/token
 ```
 
-`get-credentials` appends to the `kubeconfig` file, the context for the GKE master we want to auth against
+`get-credentials` appends to the `kubeconfig` file, the context for the GKE master we want to auth against, it's formatted like this `gke_$PROJECT_$ZONE_$CLUSTER_NAME`
 
 ```shell
 GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json" gcloud container clusters get-credentials gke-serviceaccount-test --zone $ZONE --project $PROJECT
+```
+
+### Token Alternative
+
+had a use case where I needed to use tokens. instead of generated credentials, skip to [Testing Context](#testing-context)
+
+```shell
+# Generate token from key
+export GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json"
+gcloud beta auth application-default print-access-token > /home/$USER/token
 ```
 
 add the token to your `/home/$USER/.kube/config`, remove auth-provider from your config file
@@ -80,11 +86,19 @@ Then add the content of your token, `$context_user` in this case, is the user th
 kubectl config set-credentials $context_user --token=$(cat /home/$USER/token)
 ```
 
+### Testing Context
+
+activate the context
+
+```shell
+kubectl config use-context $context_name
+```
+
 use the token to delete a random item
 
 ```shell
-kubectl get pods --token $USER_TOKEN
-kubectl delete pods/$podname --namespace $namespace --token $USER_TOKEN
+kubectl get pods
+kubectl delete pods/$podname --namespace $namespace
 ```
 
 verify in stackdriver
