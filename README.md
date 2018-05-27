@@ -242,6 +242,7 @@ kubectl create secret generic $APPLICATION --from-file key.json
 those environment variables are local to the container
 
 ```shell
+envsubst < deployment.template.yaml > deployment.yaml
 kubectl apply -f deployment.yaml
 ```
 
