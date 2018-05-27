@@ -125,6 +125,8 @@ protoPayload.resourceName="core/v1/namespaces/$namespace/pods/$podname"
 
 ## Run Workload
 
+this part of the tutorial is assuming workload is pulling an image from gcr inside the same project `gcr.io/$PROJECT/$PREFIX/web-app`
+
 ```shell
 gcloud container clusters get-credentials gke-serviceaccount-test --zone $ZONE --project $PROJECT
 
