@@ -125,32 +125,38 @@ protoPayload.resourceName="core/v1/namespaces/$namespace/pods/$podname"
 
 ## Run Workload
 
-this part of the tutorial is assuming workload is pulling an image from gcr inside the same project `gcr.io/$PROJECT/$PREFIX/web-app`
+In shell set this variable
+
+```shell
+APPLICATION=web-app
+```
+
+this part of the tutorial is assuming workload is pulling an image from gcr inside the same project `gcr.io/$PROJECT/$PREFIX/$APPLICATION`
 
 ```shell
 gcloud container clusters get-credentials gke-serviceaccount-test --zone $ZONE --project $PROJECT
 
-kubectl run web-app --image=gcr.io/$PROJECT/$PREFIX/web-app 
+kubectl run $APPLICATION --image=gcr.io/$PROJECT/$PREFIX/$APPLICATION
 ```
 
 ### Workload Fails (ImagePullBackOff)
 
 ```shell
-POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="web-app")].metadata.name}'`
+POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="$APPLICATION")].metadata.name}'`
 
 $ kubectl describe pod $POD_NAME
 ...
 Events:
   Type     Reason                 Age               From                                                          Message
   ----     ------                 ----              ----                                                          -------
-  Normal   Scheduled              7m                default-scheduler                                             Successfully assigned web-app-764784b488-kcgvv to gke-gke-serviceac
+  Normal   Scheduled              7m                default-scheduler                                             Successfully assigned $APPLICATION-764784b488-kcgvv to gke-gke-serviceac
 count-t-default-pool-a262a520-7dw5
   Normal   SuccessfulMountVolume  7m                kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  MountVolume.SetUp succeeded for volume "default-token-t8sg8"
-  Normal   Pulling                5m (x4 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  pulling image "gcr.io/$PROJECT/$PREFIX/web-app"
-  Warning  Failed                 5m (x4 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Failed to pull image "gcr.io/$PROJECT/$PREFIX/web-app": rpc er
-ror: code = Unknown desc = Error response from daemon: repository gcr.io/$PROJECT/$PREFIX/web-app not found: does not exist or no pull access
+  Normal   Pulling                5m (x4 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  pulling image "gcr.io/$PROJECT/$PREFIX/$APPLICATION"
+  Warning  Failed                 5m (x4 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Failed to pull image "gcr.io/$PROJECT/$PREFIX/$APPLICATION": rpc er
+ror: code = Unknown desc = Error response from daemon: repository gcr.io/$PROJECT/$PREFIX/$APPLICATION not found: does not exist or no pull access
   Warning  Failed                 5m (x4 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Error: ErrImagePull
-  Normal   BackOff                5m (x6 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Back-off pulling image "gcr.io/$PROJECT/$PREFIX/web-app"
+  Normal   BackOff                5m (x6 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Back-off pulling image "gcr.io/$PROJECT/$PREFIX/$APPLICATION"
   Warning  Failed                 2m (x20 over 7m)  kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Error: ImagePullBackOff
 ```
 
@@ -174,7 +180,10 @@ gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_S
 BUCKET_NAME=artifacts.$PROJECT.appspot.com/
 gsutil iam ch serviceAccount:$NODE_SA_EMAIL:objectViewer gs://$BUCKET_NAME
 
-POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="web-app")].metadata.name}'`
+POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="$APPLICATION")].metadata.name}'`
+
+kubectl describe pod $POD_NAME
+```
 
 $ kubectl delete pod $POD_NAME
 ```
