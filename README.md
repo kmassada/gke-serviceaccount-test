@@ -20,7 +20,9 @@ gcloud config set container/new_scopes_behavior true
 ## Create Cluster
 
 ```shell
-gcloud beta container clusters create gke-serviceaccount-test \
+export CLUSTER_NAME=serviceaccount-test
+
+gcloud beta container clusters create serviceaccount-test \
   --service-account=$NODE_SA_EMAIL \
   --zone=$ZONE \
   --cluster-version=$VERSION
@@ -39,7 +41,7 @@ export PROJECT=`gcloud config get-value project`
 
 gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${CICD_SA_EMAIL} --role=roles/container.developer
 
-# Create service account key and activate it
+# Create service account key
 gcloud iam service-accounts keys create \
     /home/$USER/key.json \
     --iam-account $CICD_SA_EMAIL
@@ -50,7 +52,7 @@ gcloud auth activate-service-account $CICD_SA_EMAIL --key-file=key.json
 `get-credentials` appends to the `kubeconfig` file, the context for the GKE master we want to auth against, it's formatted like this `gke_$PROJECT_$ZONE_$CLUSTER_NAME`
 
 ```shell
-GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json" gcloud container clusters get-credentials gke-serviceaccount-test --zone $ZONE --project $PROJECT
+GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json" gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT
 ```
 
 ### Token Alternative
@@ -91,7 +93,7 @@ kubectl config set-credentials $context_user --token=$(cat /home/$USER/token)
 context was generated using `gcloud container clusters`
 
 ```shell
-GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json" gcloud container clusters get-credentials gke-serviceaccount-test --zone $ZONE --project $PROJECT
+GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json" gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT
 ```
 
 there's no need to activate the context since `gcloud container clusters get-credentials` did it for you, but just to be explicit, list context avaialable to you first
@@ -118,7 +120,7 @@ verify in stackdriver
 ```shell
 resource.type="k8s_cluster"
 resource.labels.location="$ZONE"
-resource.labels.cluster_name="gke-serviceaccount-test"
+resource.labels.cluster_name="$CLUSTER_NAME"
 protoPayload.methodName:"delete"
 protoPayload.resourceName="core/v1/namespaces/$namespace/pods/$podname"
 ```
@@ -134,7 +136,7 @@ APPLICATION=web-app
 this part of the tutorial is assuming workload is pulling an image from gcr inside the same project `gcr.io/$PROJECT/$PREFIX/$APPLICATION`
 
 ```shell
-gcloud container clusters get-credentials gke-serviceaccount-test --zone $ZONE --project $PROJECT
+gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT
 
 kubectl run $APPLICATION --image=gcr.io/$PROJECT/$PREFIX/$APPLICATION
 ```
@@ -149,15 +151,14 @@ $ kubectl describe pod $POD_NAME
 Events:
   Type     Reason                 Age               From                                                          Message
   ----     ------                 ----              ----                                                          -------
-  Normal   Scheduled              7m                default-scheduler                                             Successfully assigned $APPLICATION-764784b488-kcgvv to gke-gke-serviceac
-count-t-default-pool-a262a520-7dw5
-  Normal   SuccessfulMountVolume  7m                kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  MountVolume.SetUp succeeded for volume "default-token-t8sg8"
-  Normal   Pulling                5m (x4 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  pulling image "gcr.io/$PROJECT/$PREFIX/$APPLICATION"
-  Warning  Failed                 5m (x4 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Failed to pull image "gcr.io/$PROJECT/$PREFIX/$APPLICATION": rpc er
+  Normal   Scheduled              7m                default-scheduler                                             Successfully assigned $APPLICATION-764784b488-kcgvv to $CLUSTER_NAME-default-pool-a262a520-7dw5
+  Normal   SuccessfulMountVolume  7m                kubelet, $CLUSTER_NAME-default-pool-a262a520-7dw5  MountVolume.SetUp succeeded for volume "default-token-t8sg8"
+  Normal   Pulling                5m (x4 over 7m)   kubelet, $CLUSTER_NAME-default-pool-a262a520-7dw5  pulling image "gcr.io/$PROJECT/$PREFIX/$APPLICATION"
+  Warning  Failed                 5m (x4 over 7m)   kubelet, $CLUSTER_NAME-default-pool-a262a520-7dw5  Failed to pull image "gcr.io/$PROJECT/$PREFIX/$APPLICATION": rpc er
 ror: code = Unknown desc = Error response from daemon: repository gcr.io/$PROJECT/$PREFIX/$APPLICATION not found: does not exist or no pull access
-  Warning  Failed                 5m (x4 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Error: ErrImagePull
-  Normal   BackOff                5m (x6 over 7m)   kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Back-off pulling image "gcr.io/$PROJECT/$PREFIX/$APPLICATION"
-  Warning  Failed                 2m (x20 over 7m)  kubelet, gke-gke-serviceaccount-t-default-pool-a262a520-7dw5  Error: ImagePullBackOff
+  Warning  Failed                 5m (x4 over 7m)   kubelet, $CLUSTER_NAME-default-pool-a262a520-7dw5  Error: ErrImagePull
+  Normal   BackOff                5m (x6 over 7m)   kubelet, $CLUSTER_NAME-default-pool-a262a520-7dw5  Back-off pulling image "gcr.io/$PROJECT/$PREFIX/$APPLICATION"
+  Warning  Failed                 2m (x20 over 7m)  kubelet, $CLUSTER_NAME-default-pool-a262a520-7dw5  Error: ImagePullBackOff
 ```
 
 ### Setting right pull permissions
