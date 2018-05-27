@@ -51,7 +51,11 @@ gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${CICD_S
 gcloud iam service-accounts keys create \
     /home/$USER/key.json \
     --iam-account $CICD_SA_EMAIL
+```
 
+NOTE: Export created key `key.json` to CICD's node and activate it.
+
+```shell
 gcloud auth activate-service-account $CICD_SA_EMAIL --key-file=key.json
 ```
 
