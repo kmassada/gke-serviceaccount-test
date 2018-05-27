@@ -1,5 +1,11 @@
 # GKE with serviceaccount
 
+## Goals
+
+- create a service account `NODE_SA_NAME` instead of using scopes for creating GKE cluster
+- create a service account `CICD_SA_NAME` used for deploying applications my prefference `skaffold`
+- create a service account `APP_SA_NAME` that interracts with GCP
+
 ## Create Node's Service Account
 
 ```shell
@@ -186,5 +192,116 @@ POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="$APPLI
 kubectl describe pod $POD_NAME
 ```
 
-$ kubectl delete pod $POD_NAME
+## Create Application's Service Account
+
+there are 2 schools of thoughts here, RBAC is more granular when it comes to permissions to cluster resources, see [kmassada/gke-rbac-test](https://github.com/kmassada/gke-rbac-test). Essentially it mounts your service account into a namespace and allows for kubectl access via the default token that is mounted.
+
+The second school of thought is to use `gcloud container get-clusters`, like in the CICD example.
+
+However For the sake of this exercise, we want permissions to access other GCP resources. example:
+
+- [Compute Engine API v1](https://cloud.google.com/compute/docs/reference/rest/v1/)
+
+```shell
+# Create service account
+export APP_SA_NAME=gke-$APPLICATION-sa
+gcloud iam service-accounts create $APP_SA_NAME --display-name "GKE $APPLICATION Application Service Account"
+export APP_SA_EMAIL=`gcloud iam service-accounts list --format='value(email)' --filter='displayName:$APPLICATION Application Service Account'`
+
+# Bind service account policy
+export PROJECT=`gcloud config get-value project`
+
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${APP_SA_EMAIL} --role=roles/compute.viewer
+
+# Create service account key and activate it
+gcloud iam service-accounts keys create \
+    /home/$USER/key.json \
+    --iam-account $APP_SA_EMAIL
+```
+
+### Configure application
+
+```shell
+kubectl create configmap project-id --from-literal "project-id=${PROJECT}"
+kubectl create configmap $APPLICATION-zone --from-literal "$APPLICATION-zone=${ZONE}"
+kubectl create configmap $APPLICATION-sa --from-literal "sa-email=${APP_SA_EMAIL}"
+kubectl create secret generic $APPLICATION --from-file key.json
+```
+
+`deploymnent.yaml` adds 3 env variables
+
+- GOOGLE_APPLICATION_CREDENTIALS
+- PROJECT_ID
+- APP_SA_EMAIL
+- ZONE
+
+those environment variables are local to the container
+
+```shell
+kubectl apply -f deployment.yaml
+```
+
+```shell
+POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="$APPLICATION")].metadata.name}'`
+
+kubectl describe pod $POD_NAME
+```
+
+drop into shell
+
+```shell
+kubectl exec -it  $POD_NAME -- bash
+```
+
+in our pod, we install google-cloud-sdk
+
+```shell
+apt-get update -qy && apt-get -qy install curl dnsutils gnupg lsb-release
+export CLOUD_SDK_REPO="cloud-sdk-$(lsb_release -c -s)"
+echo "deb http://packages.cloud.google.com/apt $CLOUD_SDK_REPO main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+apt-get update && apt-get install -qy google-cloud-sdk
+```
+
+now we see our container is active using NODE_SA
+
+```console
+gcloud auth list
+                   Credentialed Accounts
+ACTIVE  ACCOUNT
+*       $NODE_SA_NAME@$PROJECT.iam.gserviceaccount.com
+```
+
+we force instead our container to auth with APP_SA
+
+```shell
+gcloud auth activate-service-account $APP_SA_EMAIL --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+```
+
+here so we can now test, we've added the role `roles/compute.viewer` this user can list nodes
+
+```console
+# gcloud compute instances list
+NAME                                       ZONE        MACHINE_TYPE   PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
+builder                                    $ZONE  n1-standard-1 ......
+```
+
+but can't list clusters in a zone.
+
+```console
+# gcloud container clusters list --zone $ZONE
+ERROR: (gcloud.container.clusters.list) ResponseError: code=403, message=Required "container.clusters.list" permission for "projects/$PROJECT"
+```
+
+In the auth list we can see the proper service account is selected
+
+```console
+# gcloud auth list
+                     Credentialed Accounts
+ACTIVE  ACCOUNT
+        $NODE_SA_NAME@makz-support-eap.iam.gserviceaccount.com
+*       $APP_SA_NAME@makz-support-eap.iam.gserviceaccount.com
+
+To set the active account, run:
+    $ gcloud config set account `ACCOUNT`
 ```
