@@ -210,7 +210,7 @@ However For the sake of this exercise, we want permissions to access other GCP r
 # Create service account
 export APP_SA_NAME=gke-$APPLICATION-sa
 gcloud iam service-accounts create $APP_SA_NAME --display-name "GKE $APPLICATION Application Service Account"
-export APP_SA_EMAIL=`gcloud iam service-accounts list --format='value(email)' --filter='displayName:$APPLICATION Application Service Account'`
+export APP_SA_EMAIL=`gcloud iam service-accounts list --format='value(email)' --filter="displayName:GKE $APPLICATION Application Service Account"`
 
 # Bind service account policy
 export PROJECT=`gcloud config get-value project`
