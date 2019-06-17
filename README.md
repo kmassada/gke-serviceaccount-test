@@ -256,7 +256,7 @@ export APPLICATION=web-app
 # Create service account
 export APP_SA=gke-$APPLICATION-sa
 gcloud iam service-accounts create $APP_SA --display-name "GKE $APPLICATION Application Service Account" \
-&& seelp 5 && \
+&& sleep 5 && \
 export APP_SA_ID=`gcloud iam service-accounts list --format='value(email)' --filter="displayName:GKE $APPLICATION Application Service Account"`
 
 # Bind service account policy
@@ -276,7 +276,7 @@ gcloud iam service-accounts keys create \
 kubectl create configmap project-id --from-literal "project-id=${PROJECT}"
 kubectl create configmap $APPLICATION-zone --from-literal "$APPLICATION-zone=${ZONE}"
 kubectl create configmap $APPLICATION-sa --from-literal "sa-email=${APP_SA_ID}"
-kubectl create secret generic $APPLICATION --from-file $APP_SA-key.json
+kubectl create secret generic $APPLICATION --from-file /home/$USER/$APP_SA-key.json
 ```
 
 `deploymnent.yaml` adds 3 env variables
