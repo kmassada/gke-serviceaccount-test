@@ -19,8 +19,8 @@ spec:
         name: ${APPLICATION}
         resources:
           limits:
-            cpu: 100m
-            memory: 200Mi
+            cpu: 250m
+            memory: 500Mi
         env:
         - name: "GOOGLE_APPLICATION_CREDENTIALS"
           value: "/var/run/secret/cloud.google.com/gke-$APPLICATION-sa-key.json"
