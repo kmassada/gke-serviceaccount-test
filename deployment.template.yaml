@@ -17,9 +17,13 @@ spec:
       containers:
       - image: nginx
         name: ${APPLICATION}
+        resources:
+          limits:
+            cpu: 100m
+            memory: 200Mi
         env:
         - name: "GOOGLE_APPLICATION_CREDENTIALS"
-          value: "/var/run/secret/cloud.google.com/key.json"
+          value: "/var/run/secret/cloud.google.com/$APPLICATION-sa-key.json"
         - name: "PROJECT_ID"
           valueFrom:
             configMapKeyRef:
