@@ -2,80 +2,113 @@
 
 ## Goals
 
-- create a service account `NODE_SA_NAME` instead of using scopes for creating GKE cluster
-- create a service account `CICD_SA_NAME` used for deploying applications my prefference `skaffold`
-- create a service account `APP_SA_NAME` that interracts with GCP
+- create a service account `NODE_SA` instead of using default service account for creating GKE cluster, practice downloading credential file and activating service account
+- create a service account `DEPLOY_SA` used for deploying applications, practice get clusters and setting context automatically (also manually replacing provider by a token); give that service account restricted access and test permissions boundaries.
+- The service account `NODE_SA` was never granted permissions to download objects from gcr, this example goes as far as setting acls on a remote bucket that leaves in another project.
+- create a service account `APP_SA`,  give that service account permissions to interacts with GCP. Download the key file to the service account, create a workload mounting that service account, make calls to GCP API from the pod
 
 ## Create Node's Service Account
 
 ```shell
-export NODE_SA_NAME=gke-node-sa
-
-gcloud iam service-accounts create $NODE_SA_NAME --display-name "Node Service Account"
-export NODE_SA_EMAIL=`gcloud iam service-accounts list --format='value(email)' --filter='displayName:Node Service Account'`
-
 export PROJECT=`gcloud config get-value project`
 
-gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_SA_EMAIL} --role=roles/monitoring.metricWriter
-gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_SA_EMAIL} --role=roles/monitoring.viewer
-gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_SA_EMAIL} --role=roles/logging.logWriter
+export NODE_SA=gke-node-sa
 
-gcloud config set container/new_scopes_behavior true
+gcloud iam service-accounts create $NODE_SA --display-name "Node Service Account" \
+&& \
+export NODE_SA_ID=`gcloud iam service-accounts list --format='value(email)' --filter='displayName:Node Service Account'`
+
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_SA_ID} --role=roles/monitoring.metricWriter
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_SA_ID} --role=roles/monitoring.viewer
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_SA_ID} --role=roles/logging.logWriter
 ```
 
 ## Create Cluster
 
 ```shell
 export CLUSTER_NAME=serviceaccount-test
+export ZONE=us-west1-c
+export VERSION=`gcloud container get-server-config --zone=$ZONE --format="value(validMasterVersions[0])"`
 
-gcloud beta container clusters create serviceaccount-test \
-  --service-account=$NODE_SA_EMAIL \
+gcloud container clusters create $CLUSTER_NAME \
+  --service-account=$NODE_SA_ID \
   --zone=$ZONE \
   --cluster-version=$VERSION
 ```
 
-## Create CI/CD's Service Account
+## Create Deploy's Service Account
 
 ```shell
-# Create service account
-export CICD_SA_NAME=gke-cicd-sa
-gcloud iam service-accounts create $CICD_SA_NAME --display-name "CI/CD Service Account"
-export CICD_SA_EMAIL=`gcloud iam service-accounts list --format='value(email)' --filter='displayName:CI/CD Service Account'`
-
 # Bind service account policy
 export PROJECT=`gcloud config get-value project`
 
-gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${CICD_SA_EMAIL} --role=roles/container.developer
+# Create service account
+export DEPLOY_SA=gke-DEPLOY-sa
+gcloud iam service-accounts create $DEPLOY_SA --display-name "Deploy Service Account" \
+&& \
+export DEPLOY_SA_ID=`gcloud iam service-accounts list --format='value(email)' --filter='displayName:Deploy Service Account'`
+
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${DEPLOY_SA_ID} --role=roles/container.developer
 
 # Create service account key
 gcloud iam service-accounts keys create \
-    /home/$USER/key.json \
-    --iam-account $CICD_SA_EMAIL
+    /home/$USER/$DEPLOY_SA-key.json \
+    --iam-account $DEPLOY_SA_ID
 ```
 
-NOTE: Export created key `key.json` to CICD's node and activate it.
+NOTE: Export created key `$DEPLOY_SA-key.json` can now be exported.
 
 ```shell
-gcloud auth activate-service-account $CICD_SA_EMAIL --key-file=key.json
+gcloud auth activate-service-account $DEPLOY_SA_ID --key-file=/home/$USER/$DEPLOY_SA-key.json
 ```
 
-`get-credentials` appends to the `kubeconfig` file, the context for the GKE master we want to auth against, it's formatted like this `gke_$PROJECT_$ZONE_$CLUSTER_NAME`
+NOTE: `get-credentials` appends to the `.kube/config` file, the context for the GKE master we want to auth against, it's formatted like this `gke_$PROJECT_$ZONE_$CLUSTER_NAME`
 
 ```shell
-GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json" gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT
+GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/$DEPLOY_SA-key.json" gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT
+```
+
+### Test Service Account permissions
+
+`$DEPLOY_SA` does only have `roles/container.developer`, which is known to not have `containers.clusters.update permissions`... Testing this boundary
+
+```shell
+gcloud container clusters update $CLUSTER_NAME --zone $ZONE --project $PROJECT --maintenance-window=12:43
+```
+
+As expected error occurs.
+
+```console
+$ gcloud container clusters update $CLUSTER_NAME --zone $ZONE --project $PROJECT --maintenance-window=12:43
+ERROR: (gcloud.container.clusters.update) ResponseError: code=403, message=Required "container.clusters.update" permission(s) for "projects/$PROJECT/zones/$ZONE/clusters/$CLUSTER_NAME". See https://cloud.google.com/kubernetes-engine/docs/troubleshooting#gke_service_account_deleted for more info.
 ```
 
 ### Token Alternative
 
-had a use case where I needed to use tokens. instead of generated credentials, skip to [Testing Context](#testing-context)
+This section is only for demonstrating how to use tokens instead of an auth provider. Proceed with the rest of the tutorial here:  [Testing Context](#testing-context)
 
 ```shell
 # Generate token from key
-export GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json"
-gcloud beta auth application-default print-access-token > /home/$USER/token
+export GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/$DEPLOY_SA-key.json"
+gcloud auth application-default print-access-token > /home/$USER/$DEPLOY_SA-token
+```
+
+`gcloud container clusters get-credentials` in the previous section would have set the `$context_user`. it can be confirmed by running
+
+```shell
+export context_user=`kubectl config current-context`
+echo $context_user
 ```
 
 add the token to your `/home/$USER/.kube/config`, remove auth-provider from your config file
+
+Then add the content of your token, `$context_user` in this case, is the user that was generated by `get-context`
+
+```shell
+kubectl config set-credentials $context_user --token=$(cat /home/$USER/$DEPLOY_SA-token)
+```
+
+it should have changed your config file this way
 
 ```diff
 18,26c18
@@ -92,18 +125,12 @@ add the token to your `/home/$USER/.kube/config`, remove auth-provider from your
 >                 "token": "<TOKEN>"
 ```
 
-Then add the content of your token, `$context_user` in this case, is the user that was generated by `get-context`
-
-```shell
-kubectl config set-credentials $context_user --token=$(cat /home/$USER/token)
-```
-
 ### Testing Context
 
-context was generated using `gcloud container clusters`
+context was generated using `gcloud container clusters` or by manually setting the token above.
 
 ```shell
-GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/key.json" gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT
+GOOGLE_APPLICATION_CREDENTIALS="/home/$USER/$DEPLOY_SA-key.json" gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT
 ```
 
 there's no need to activate the context since `gcloud container clusters get-credentials` did it for you, but just to be explicit, list context avaialable to you first
@@ -140,7 +167,7 @@ protoPayload.resourceName="core/v1/namespaces/$namespace/pods/$podname"
 In shell set this variable
 
 ```shell
-APPLICATION=web-app
+export APPLICATION=web-app
 ```
 
 this part of the tutorial is assuming workload is pulling an image from gcr inside the same project `gcr.io/$PROJECT/$PREFIX/$APPLICATION`
@@ -154,7 +181,7 @@ kubectl run $APPLICATION --image=gcr.io/$PROJECT/$PREFIX/$APPLICATION
 ### Workload Fails (ImagePullBackOff)
 
 ```shell
-POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="$APPLICATION")].metadata.name}'`
+export POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=='\""$APPLICATION"\"')].metadata.name}'`
 
 $ kubectl describe pod $POD_NAME
 ...
@@ -173,23 +200,23 @@ ror: code = Unknown desc = Error response from daemon: repository gcr.io/$PROJEC
 
 ### Setting right pull permissions
 
-NOTE: `CICD_SA` was not configured to be able to set iam permissions, these steps are done via the same admin account that created `CICD_SA`
+NOTE: `DEPLOY_SA` was not configured to be able to set iam permissions, these steps are done via the same admin account that created `DEPLOY_SA`
 
 <!--
 here's how I wish it worked
 ```shell
 BUCKET_PATH=artifacts.$PROJECT.appspot.com/containers/repositories/library/$PREFIX/
-gsutil acl ch -r -u $NODE_SA_EMAIL:R gs://$BUCKET_PATH
+gsutil acl ch -r -u $NODE_SA_ID:R gs://$BUCKET_PATH
 ```-->
 
 <!--
 This is not recommended
-gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_SA_EMAIL} --role=roles/storage.objectViewer
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${NODE_SA_ID} --role=roles/storage.objectViewer
 -->
 
 ```shell
 BUCKET_NAME=artifacts.$PROJECT.appspot.com/
-gsutil iam ch serviceAccount:$NODE_SA_EMAIL:objectViewer gs://$BUCKET_NAME
+gsutil iam ch serviceAccount:$NODE_SA_ID:objectViewer gs://$BUCKET_NAME
 
 POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="$APPLICATION")].metadata.name}'`
 
@@ -200,27 +227,44 @@ kubectl describe pod $POD_NAME
 
 there are 2 schools of thoughts here, RBAC is more granular when it comes to permissions to cluster resources, see [kmassada/gke-rbac-test](https://github.com/kmassada/gke-rbac-test). Essentially it mounts your service account into a namespace and allows for kubectl access via the default token that is mounted.
 
-The second school of thought is to use `gcloud container get-clusters`, like in the CICD example.
+The second school of thought is to use `gcloud container get-clusters`, like in the DEPLOY example.
 
 However For the sake of this exercise, we want permissions to access other GCP resources. example:
 
 - [Compute Engine API v1](https://cloud.google.com/compute/docs/reference/rest/v1/)
 
+Set the correct admin account before proceeding
+
 ```shell
+$ gcloud auth list
+                 Credentialed Accounts
+ACTIVE  ACCOUNT
+*       NODE_SA@$PROJECT.iam.gserviceaccount.com
+        you@example.com
+$ gcloud config set account you@example.com
+Updated property [core/account].
+```
+
+proceed to create the GCP service account
+
+```shell
+export APPLICATION=web-app
+
 # Create service account
-export APP_SA_NAME=gke-$APPLICATION-sa
-gcloud iam service-accounts create $APP_SA_NAME --display-name "GKE $APPLICATION Application Service Account"
-export APP_SA_EMAIL=`gcloud iam service-accounts list --format='value(email)' --filter="displayName:GKE $APPLICATION Application Service Account"`
+export APP_SA=gke-$APPLICATION-sa
+gcloud iam service-accounts create $APP_SA --display-name "GKE $APPLICATION Application Service Account" \
+&& \
+export APP_SA_ID=`gcloud iam service-accounts list --format='value(email)' --filter="displayName:GKE $APPLICATION Application Service Account"`
 
 # Bind service account policy
 export PROJECT=`gcloud config get-value project`
 
-gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${APP_SA_EMAIL} --role=roles/compute.viewer
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:${APP_SA_ID} --role=roles/compute.viewer
 
 # Create service account key and activate it
 gcloud iam service-accounts keys create \
-    /home/$USER/key.json \
-    --iam-account $APP_SA_EMAIL
+    /home/$USER/$APP_SA-key.json \
+    --iam-account $APP_SA_ID
 ```
 
 ### Configure application
@@ -228,15 +272,15 @@ gcloud iam service-accounts keys create \
 ```shell
 kubectl create configmap project-id --from-literal "project-id=${PROJECT}"
 kubectl create configmap $APPLICATION-zone --from-literal "$APPLICATION-zone=${ZONE}"
-kubectl create configmap $APPLICATION-sa --from-literal "sa-email=${APP_SA_EMAIL}"
-kubectl create secret generic $APPLICATION --from-file key.json
+kubectl create configmap $APPLICATION-sa --from-literal "sa-email=${APP_SA_ID}"
+kubectl create secret generic $APPLICATION --from-file $APP_SA-key.json
 ```
 
 `deploymnent.yaml` adds 3 env variables
 
 - GOOGLE_APPLICATION_CREDENTIALS
 - PROJECT_ID
-- APP_SA_EMAIL
+- APP_SA_ID
 - ZONE
 
 those environment variables are local to the container
@@ -247,7 +291,7 @@ kubectl apply -f deployment.yaml
 ```
 
 ```shell
-POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=="$APPLICATION")].metadata.name}'`
+export POD_NAME=`kubectl get pods -o jsonpath='{.items[?(@.metadata.labels.run=='\""$APPLICATION"\"')].metadata.name}'`
 
 kubectl describe pod $POD_NAME
 ```
@@ -261,10 +305,10 @@ kubectl exec -it  $POD_NAME -- bash
 in our pod, we install google-cloud-sdk
 
 ```shell
-apt-get update -qy && apt-get -qy install curl dnsutils gnupg lsb-release
-export CLOUD_SDK_REPO="cloud-sdk-$(lsb_release -c -s)"
-echo "deb http://packages.cloud.google.com/apt $CLOUD_SDK_REPO main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+apt-get update -qy && apt-get -qy install curl dnsutils gnupg lsb-release && \
+export CLOUD_SDK_REPO="cloud-sdk-$(lsb_release -c -s)" && \
+echo "deb http://packages.cloud.google.com/apt $CLOUD_SDK_REPO main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
 apt-get update && apt-get install -qy google-cloud-sdk
 ```
 
@@ -274,13 +318,13 @@ now we see our container is active using NODE_SA
 gcloud auth list
                    Credentialed Accounts
 ACTIVE  ACCOUNT
-*       $NODE_SA_NAME@$PROJECT.iam.gserviceaccount.com
+*       $NODE_SA@$PROJECT.iam.gserviceaccount.com
 ```
 
 we force instead our container to auth with APP_SA
 
 ```shell
-gcloud auth activate-service-account $APP_SA_EMAIL --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+gcloud auth activate-service-account $APP_SA_ID --key-file=$GOOGLE_APPLICATION_CREDENTIALS
 ```
 
 here so we can now test, we've added the role `roles/compute.viewer` this user can list nodes
@@ -304,8 +348,8 @@ In the auth list we can see the proper service account is selected
 # gcloud auth list
                      Credentialed Accounts
 ACTIVE  ACCOUNT
-        $NODE_SA_NAME@makz-support-eap.iam.gserviceaccount.com
-*       $APP_SA_NAME@makz-support-eap.iam.gserviceaccount.com
+        $NODE_SA@makz-support-eap.iam.gserviceaccount.com
+*       $APP_SA@makz-support-eap.iam.gserviceaccount.com
 
 To set the active account, run:
     $ gcloud config set account `ACCOUNT`
